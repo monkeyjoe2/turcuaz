@@ -1,24 +1,16 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const useragent = require('useragent');
 const geoip = require('geoip-lite');
 const UAParser = require('ua-parser-js');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
-const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const requestIp = require('request-ip');
-const DeviceDetector = require('device-detector-js');
-const FingerprintCollector = require('./fingerprint');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Initialize collectors
-const fingerprintCollector = new FingerprintCollector();
-const deviceDetector = new DeviceDetector();
 
 // Security middleware
 app.use(helmet({
@@ -35,16 +27,18 @@ app.use(helmet({
 
 // Rate limiting
 const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
-    message: 'Too many requests from this IP, please try again later.'
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: 'Too many requests from this IP, please try again later.',
+    standardHeaders: true,
+    legacyHeaders: false
 });
 app.use('/api/', limiter);
 
 // Other middleware
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(requestIp.mw());
 app.use(express.static('public'));
@@ -52,7 +46,7 @@ app.use(express.static('public'));
 // Create data directory
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir);
+    fs.mkdirSync(dataDir, { recursive: true });
 }
 
 // Enhanced user data collection
@@ -60,123 +54,68 @@ function collectEnhancedUserData(req) {
     const ip = requestIp.getClientIp(req);
     const userAgent = req.headers['user-agent'] || '';
     
-    // Parse user agent with multiple libraries
+    // Parse user agent
     const parser = new UAParser();
     const uaResult = parser.setUA(userAgent).getResult();
-    const agent = useragent.parse(userAgent);
-    const device = deviceDetector.parse(userAgent);
     
     // Get geo location
     const geo = geoip.lookup(ip);
     
-    // Collect fingerprint data
-    const fingerprint = fingerprintCollector.collectAllFingerprintData(req);
-    
     // Enhanced user data object
     const userData = {
-        // Timestamp
         timestamp: new Date().toISOString(),
         sessionId: req.cookies.sessionId || generateSessionId(),
         
-        // Network information
         network: {
             ip: ip,
-            publicIp: req.ip,
             headers: {
                 'x-forwarded-for': req.headers['x-forwarded-for'],
                 'x-real-ip': req.headers['x-real-ip'],
-                'cf-connecting-ip': req.headers['cf-connecting-ip'],
-                'x-client-ip': req.headers['x-client-ip']
+                'cf-connecting-ip': req.headers['cf-connecting-ip']
             },
             isp: geo ? geo.isp : null,
             organization: geo ? geo.org : null
         },
         
-        // Browser information (triple verification)
         browser: {
-            // UAParser results
-            uaParser: {
-                name: uaResult.browser.name,
-                version: uaResult.browser.version,
-                major: uaResult.browser.major
-            },
-            // Useragent results
-            useragent: {
-                family: agent.family,
-                major: agent.major,
-                minor: agent.minor,
-                patch: agent.patch
-            },
-            // Device detector results
-            deviceDetector: device.client || {},
-            // Raw user agent
-            raw: userAgent.substring(0, 500) // Limit length
+            name: uaResult.browser.name,
+            version: uaResult.browser.version,
+            major: uaResult.browser.major,
+            raw: userAgent.substring(0, 500)
         },
         
-        // Operating System
         os: {
-            uaParser: {
-                name: uaResult.os.name,
-                version: uaResult.os.version
-            },
-            useragent: {
-                family: agent.os.family,
-                major: agent.os.major,
-                minor: agent.os.minor,
-                patch: agent.os.patch
-            },
-            deviceDetector: device.os || {}
+            name: uaResult.os.name,
+            version: uaResult.os.version
         },
         
-        // Device information
         device: {
-            type: device.device?.type || uaResult.device.type || 'desktop',
-            model: device.device?.model || uaResult.device.model,
-            brand: device.device?.brand || uaResult.device.vendor,
+            type: uaResult.device.type || 'desktop',
+            model: uaResult.device.model,
+            vendor: uaResult.device.vendor,
             isMobile: /mobile/i.test(userAgent),
-            isTablet: /tablet/i.test(userAgent),
-            isDesktop: !/mobile|tablet/i.test(userAgent),
-            isBot: device.bot || false,
-            botInfo: device.bot || null
+            isTablet: /tablet/i.test(userAgent)
         },
         
-        // Engine information
         engine: {
             name: uaResult.engine.name,
             version: uaResult.engine.version
         },
         
-        // CPU architecture
         cpu: {
             architecture: uaResult.cpu.architecture
         },
         
-        // Screen information (from headers if available)
         screen: {
             width: req.headers['screen-width'] || req.body.screenWidth || '',
-            height: req.headers['screen-height'] || req.body.screenHeight || '',
-            colorDepth: req.headers['color-depth'] || req.body.colorDepth || '',
-            pixelRatio: req.headers['pixel-ratio'] || req.body.pixelRatio || '',
-            orientation: req.headers['orientation'] || ''
+            height: req.headers['screen-height'] || req.body.screenHeight || ''
         },
         
-        // Language and locale
         locale: {
             language: req.headers['accept-language'] || '',
-            languages: req.acceptsLanguages() || [],
-            locale: req.headers['accept-locale'] || ''
+            languages: req.acceptsLanguages() || []
         },
         
-        // Connection information
-        connection: {
-            remoteAddress: req.connection.remoteAddress,
-            remotePort: req.connection.remotePort,
-            localAddress: req.connection.localAddress,
-            localPort: req.connection.localPort,
-            encrypted: req.secure
-        },
-        
-        // Geographic location
         geo: geo ? {
             country: geo.country,
             region: geo.region,
@@ -190,61 +129,24 @@ function collectEnhancedUserData(req) {
             as: geo.as
         } : null,
         
-        // Request details
         request: {
             method: req.method,
             url: req.url,
             protocol: req.protocol,
             secure: req.secure,
-            hostname: req.hostname,
-            subdomains: req.subdomains,
-            originalUrl: req.originalUrl,
-            path: req.path,
-            query: req.query,
-            params: req.params,
-            cookies: req.cookies,
-            signedCookies: req.signedCookies,
-            fresh: req.fresh,
-            stale: req.stale,
-            xhr: req.xhr
+            hostname: req.hostname
         },
         
-        // Headers (excluding sensitive ones)
         headers: {
             host: req.headers.host,
             connection: req.headers.connection,
             'cache-control': req.headers['cache-control'],
-            'upgrade-insecure-requests': req.headers['upgrade-insecure-requests'],
             'sec-fetch-site': req.headers['sec-fetch-site'],
             'sec-fetch-mode': req.headers['sec-fetch-mode'],
-            'sec-fetch-user': req.headers['sec-fetch-user'],
             'sec-fetch-dest': req.headers['sec-fetch-dest'],
             referer: req.headers.referer,
             dnt: req.headers.dnt
-        },
-        
-        // Fingerprint data
-        fingerprint: fingerprint,
-        
-        // Performance metrics (if sent from client)
-        performance: req.body.performance || null,
-        
-        // Storage information (if available)
-        storage: {
-            localStorage: req.body.localStorage || false,
-            sessionStorage: req.body.sessionStorage || false,
-            indexedDB: req.body.indexedDB || false,
-            cookiesEnabled: req.body.cookiesEnabled || false
-        },
-        
-        // WebRTC IP (if leaked by client)
-        webRTC: req.body.webRTC || null,
-        
-        // Battery API (if available)
-        battery: req.body.battery || null,
-        
-        // Media devices (if available)
-        mediaDevices: req.body.mediaDevices || null
+        }
     };
 
     return userData;
@@ -287,8 +189,7 @@ function logToCSV(userData) {
     const csvFile = path.join(dataDir, 'logs.csv');
     const headers = [
         'timestamp', 'ip', 'country', 'city', 'browser', 'browser_version',
-        'os', 'os_version', 'device_type', 'device_model', 'screen',
-        'language', 'timezone', 'is_mobile', 'is_bot', 'session_id'
+        'os', 'os_version', 'device_type', 'screen', 'language', 'timezone'
     ];
     
     const row = [
@@ -296,18 +197,14 @@ function logToCSV(userData) {
         userData.network.ip,
         userData.geo?.country || 'Unknown',
         userData.geo?.city || 'Unknown',
-        userData.browser.uaParser.name || 'Unknown',
-        userData.browser.uaParser.version || 'Unknown',
-        userData.os.uaParser.name || 'Unknown',
-        userData.os.uaParser.version || 'Unknown',
+        userData.browser.name || 'Unknown',
+        userData.browser.version || 'Unknown',
+        userData.os.name || 'Unknown',
+        userData.os.version || 'Unknown',
         userData.device.type || 'Unknown',
-        userData.device.model || 'Unknown',
         `${userData.screen.width}x${userData.screen.height}`,
         userData.locale.language?.split(',')[0] || 'Unknown',
-        userData.geo?.timezone || 'Unknown',
-        userData.device.isMobile ? 'Yes' : 'No',
-        userData.device.isBot ? 'Yes' : 'No',
-        userData.sessionId
+        userData.geo?.timezone || 'Unknown'
     ].map(field => `"${field}"`).join(',');
     
     try {
@@ -325,7 +222,7 @@ app.post('/api/collect', (req, res) => {
     try {
         const userData = collectEnhancedUserData(req);
         
-        // Merge client-side data
+        // Merge client-side data if provided
         if (req.body.clientData) {
             userData.clientData = req.body.clientData;
         }
@@ -353,8 +250,9 @@ app.get('/', (req, res) => {
     if (!req.cookies.sessionId) {
         const sessionId = generateSessionId();
         res.cookie('sessionId', sessionId, {
-            maxAge: 24 * 60 * 60 * 1000, // 24 hours
-            httpOnly: true
+            maxAge: 24 * 60 * 60 * 1000,
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production'
         });
     }
     
@@ -369,7 +267,6 @@ app.get('/', (req, res) => {
 app.get('/api/logs', (req, res) => {
     try {
         const logFile = path.join(dataDir, 'logs.json');
-        const csvFile = path.join(dataDir, 'logs.csv');
         
         if (fs.existsSync(logFile)) {
             const data = fs.readFileSync(logFile, 'utf8');
@@ -392,7 +289,7 @@ app.get('/api/logs', (req, res) => {
             
             logs.forEach(log => {
                 // Browser stats
-                const browser = log.browser.uaParser.name || 'Unknown';
+                const browser = log.browser.name || 'Unknown';
                 stats.browsers[browser] = (stats.browsers[browser] || 0) + 1;
                 
                 // Device stats
@@ -404,7 +301,7 @@ app.get('/api/logs', (req, res) => {
                 stats.countries[country] = (stats.countries[country] || 0) + 1;
                 
                 // OS stats
-                const os = log.os.uaParser.name || 'Unknown';
+                const os = log.os.name || 'Unknown';
                 stats.os[os] = (stats.os[os] || 0) + 1;
             });
             
@@ -412,7 +309,7 @@ app.get('/api/logs', (req, res) => {
                 success: true,
                 stats: stats,
                 total: logs.length,
-                logs: logs.slice(-50).reverse() // Last 50 entries
+                logs: logs.slice(-50).reverse()
             });
         } else {
             res.json({
@@ -507,6 +404,32 @@ app.get('/api/logs/csv', (req, res) => {
             error: 'Failed to download CSV'
         });
     }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        error: 'Route not found'
+    });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+    });
 });
 
 // Start server
