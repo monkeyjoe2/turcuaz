@@ -4,13 +4,14 @@ const path = require('path');
 const geoip = require('geoip-lite');
 const UAParser = require('ua-parser-js');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
-const requestIp = require('request-ip');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Configure Express to trust proxies
+app.set('trust proxy', true);
 
 // Security middleware
 app.use(helmet({
@@ -25,22 +26,11 @@ app.use(helmet({
     }
 }));
 
-// Rate limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    message: 'Too many requests from this IP, please try again later.',
-    standardHeaders: true,
-    legacyHeaders: false
-});
-app.use('/api/', limiter);
-
 // Other middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use(requestIp.mw());
 app.use(express.static('public'));
 
 // Create data directory
@@ -49,62 +39,174 @@ if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
 }
 
+// Helper function to check if IP is localhost
+function isLocalhost(ip) {
+    if (!ip) return true;
+    
+    // Clean the IP
+    ip = ip.trim();
+    
+    // Remove IPv6 prefix if present
+    ip = ip.replace('::ffff:', '');
+    
+    const localIPs = ['127.0.0.1', '::1', 'localhost'];
+    const privateIPRanges = [
+        '192.168.',
+        '10.',
+        '172.16.',
+        '172.17.',
+        '172.18.',
+        '172.19.',
+        '172.20.',
+        '172.21.',
+        '172.22.',
+        '172.23.',
+        '172.24.',
+        '172.25.',
+        '172.26.',
+        '172.27.',
+        '172.28.',
+        '172.29.',
+        '172.30.',
+        '172.31.'
+    ];
+    
+    if (localIPs.includes(ip)) return true;
+    
+    // Check private IP ranges
+    for (const range of privateIPRanges) {
+        if (ip.startsWith(range)) return true;
+    }
+    
+    return false;
+}
+
+// Get client IP with proxy support
+function getClientIP(req) {
+    // Priority order for IP detection
+    const sources = [
+        // Cloudflare
+        req.headers['cf-connecting-ip'],
+        // Standard proxy headers
+        req.headers['x-real-ip'],
+        req.headers['x-forwarded-for'],
+        req.headers['forwarded'],
+        // Express properties
+        req.ip,
+        // Connection properties
+        req.socket.remoteAddress,
+        req.connection.remoteAddress
+    ];
+    
+    for (const source of sources) {
+        if (source) {
+            let ip = source.toString().trim();
+            
+            // Handle x-forwarded-for format: "client, proxy1, proxy2"
+            if (source.includes(',')) {
+                const ips = source.split(',').map(ip => ip.trim());
+                // First IP in x-forwarded-for is the client
+                ip = ips[0];
+            }
+            
+            // Handle forwarded header format: "for=192.0.2.43;proto=http;by=203.0.113.43"
+            if (source.includes('for=')) {
+                const match = source.match(/for=([^;]+)/);
+                if (match && match[1]) {
+                    ip = match[1].trim();
+                }
+            }
+            
+            // Remove IPv6 prefix if present
+            ip = ip.replace('::ffff:', '');
+            
+            // Clean up
+            ip = ip.trim();
+            
+            if (ip && ip !== '::1' && ip !== '127.0.0.1') {
+                return ip;
+            }
+        }
+    }
+    
+    return '127.0.0.1'; // Fallback to localhost
+}
+
 // Enhanced user data collection
 function collectEnhancedUserData(req) {
-    const ip = requestIp.getClientIp(req);
+    const clientIP = getClientIP(req);
     const userAgent = req.headers['user-agent'] || '';
+    const isLocal = isLocalhost(clientIP);
     
     // Parse user agent
     const parser = new UAParser();
     const uaResult = parser.setUA(userAgent).getResult();
     
-    // Get geo location
-    const geo = geoip.lookup(ip);
+    // Get geo location (handle localhost specially)
+    let geo = geoip.lookup(clientIP);
+    
+    if (isLocal && !geo) {
+        // Create dummy geo data for localhost for testing
+        geo = {
+            country: 'Localhost',
+            region: 'Development',
+            city: 'Local Machine',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+            ll: [0, 0],
+            metro: 0,
+            range: [clientIP, clientIP],
+            isp: 'Local Network',
+            org: 'Development Environment'
+        };
+    }
     
     // Enhanced user data object
     const userData = {
         timestamp: new Date().toISOString(),
         sessionId: req.cookies.sessionId || generateSessionId(),
+        isLocalhost: isLocal,
         
         network: {
-            ip: ip,
+            ip: clientIP,
+            isLocalhost: isLocal,
             headers: {
-                'x-forwarded-for': req.headers['x-forwarded-for'],
-                'x-real-ip': req.headers['x-real-ip'],
-                'cf-connecting-ip': req.headers['cf-connecting-ip']
+                'x-forwarded-for': req.headers['x-forwarded-for'] || null,
+                'x-real-ip': req.headers['x-real-ip'] || null,
+                'cf-connecting-ip': req.headers['cf-connecting-ip'] || null,
+                'forwarded': req.headers['forwarded'] || null
             },
             isp: geo ? geo.isp : null,
             organization: geo ? geo.org : null
         },
         
         browser: {
-            name: uaResult.browser.name,
-            version: uaResult.browser.version,
-            major: uaResult.browser.major,
+            name: uaResult.browser.name || 'Unknown',
+            version: uaResult.browser.version || 'Unknown',
+            major: uaResult.browser.major || 'Unknown',
             raw: userAgent.substring(0, 500)
         },
         
         os: {
-            name: uaResult.os.name,
-            version: uaResult.os.version
+            name: uaResult.os.name || 'Unknown',
+            version: uaResult.os.version || 'Unknown'
         },
         
         device: {
             type: uaResult.device.type || 'desktop',
-            model: uaResult.device.model,
-            vendor: uaResult.device.vendor,
+            model: uaResult.device.model || 'Unknown',
+            vendor: uaResult.device.vendor || 'Unknown',
             isMobile: /mobile/i.test(userAgent),
             isTablet: /tablet/i.test(userAgent),
             isDesktop: !/mobile|tablet/i.test(userAgent)
         },
         
         engine: {
-            name: uaResult.engine.name,
-            version: uaResult.engine.version
+            name: uaResult.engine.name || 'Unknown',
+            version: uaResult.engine.version || 'Unknown'
         },
         
         cpu: {
-            architecture: uaResult.cpu.architecture
+            architecture: uaResult.cpu.architecture || 'Unknown'
         },
         
         screen: {
@@ -113,21 +215,21 @@ function collectEnhancedUserData(req) {
         },
         
         locale: {
-            language: req.headers['accept-language'] || '',
+            language: req.headers['accept-language'] || 'Unknown',
             languages: req.acceptsLanguages() || []
         },
         
         geo: geo ? {
-            country: geo.country,
-            region: geo.region,
-            city: geo.city,
-            ll: geo.ll,
-            timezone: geo.timezone,
-            metro: geo.metro,
-            range: geo.range,
-            isp: geo.isp,
-            org: geo.org,
-            as: geo.as
+            country: geo.country || 'Unknown',
+            region: geo.region || 'Unknown',
+            city: geo.city || 'Unknown',
+            ll: geo.ll || [0, 0],
+            timezone: geo.timezone || 'UTC',
+            metro: geo.metro || 0,
+            range: geo.range || [clientIP, clientIP],
+            isp: geo.isp || 'Unknown',
+            org: geo.org || 'Unknown',
+            as: geo.as || 'Unknown'
         } : null,
         
         request: {
@@ -135,18 +237,21 @@ function collectEnhancedUserData(req) {
             url: req.url,
             protocol: req.protocol,
             secure: req.secure,
-            hostname: req.hostname
+            hostname: req.hostname,
+            originalUrl: req.originalUrl,
+            path: req.path,
+            query: req.query || {}
         },
         
         headers: {
-            host: req.headers.host,
-            connection: req.headers.connection,
-            'cache-control': req.headers['cache-control'],
-            'sec-fetch-site': req.headers['sec-fetch-site'],
-            'sec-fetch-mode': req.headers['sec-fetch-mode'],
-            'sec-fetch-dest': req.headers['sec-fetch-dest'],
-            referer: req.headers.referer,
-            dnt: req.headers.dnt
+            host: req.headers.host || 'Unknown',
+            connection: req.headers.connection || 'Unknown',
+            'cache-control': req.headers['cache-control'] || 'Unknown',
+            'sec-fetch-site': req.headers['sec-fetch-site'] || 'Unknown',
+            'sec-fetch-mode': req.headers['sec-fetch-mode'] || 'Unknown',
+            'sec-fetch-dest': req.headers['sec-fetch-dest'] || 'Unknown',
+            referer: req.headers.referer || 'No referer',
+            dnt: req.headers.dnt || 'Not specified'
         }
     };
 
@@ -158,7 +263,7 @@ function generateSessionId() {
     return 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
 
-// Save user data to file
+// Save user data to file with better error handling
 function saveUserData(userData) {
     const logFile = path.join(dataDir, 'logs.json');
     let logs = [];
@@ -166,17 +271,25 @@ function saveUserData(userData) {
     try {
         if (fs.existsSync(logFile)) {
             const data = fs.readFileSync(logFile, 'utf8');
-            logs = JSON.parse(data);
+            if (data.trim()) {
+                logs = JSON.parse(data);
+            }
         }
     } catch (err) {
         console.error('Error reading log file:', err);
+        // Create fresh logs array if file is corrupted
+        logs = [];
     }
 
     logs.push(userData);
 
     try {
         fs.writeFileSync(logFile, JSON.stringify(logs, null, 2));
-        console.log(`[${new Date().toISOString()}] Collected data from IP: ${userData.network.ip}`);
+        console.log(`✅ [${new Date().toISOString()}] Collected data from IP: ${userData.network.ip}`);
+        console.log(`   Browser: ${userData.browser.name} ${userData.browser.version}`);
+        console.log(`   OS: ${userData.os.name} ${userData.os.version}`);
+        console.log(`   Device: ${userData.device.type}`);
+        console.log(`   Country: ${userData.geo?.country || 'Unknown'}`);
         
         // Also log to CSV for easier analysis
         logToCSV(userData);
@@ -190,7 +303,7 @@ function logToCSV(userData) {
     const csvFile = path.join(dataDir, 'logs.csv');
     const headers = [
         'timestamp', 'ip', 'country', 'city', 'browser', 'browser_version',
-        'os', 'os_version', 'device_type', 'screen', 'language', 'timezone'
+        'os', 'os_version', 'device_type', 'screen', 'language', 'timezone', 'is_localhost'
     ];
     
     const row = [
@@ -205,7 +318,8 @@ function logToCSV(userData) {
         userData.device.type || 'Unknown',
         `${userData.screen.width}x${userData.screen.height}`,
         userData.locale.language?.split(',')[0] || 'Unknown',
-        userData.geo?.timezone || 'Unknown'
+        userData.geo?.timezone || 'Unknown',
+        userData.isLocalhost ? 'Yes' : 'No'
     ].map(field => `"${field}"`).join(',');
     
     try {
@@ -234,7 +348,9 @@ app.post('/api/collect', (req, res) => {
             success: true,
             message: 'Data collected successfully',
             sessionId: userData.sessionId,
-            timestamp: userData.timestamp
+            timestamp: userData.timestamp,
+            ip: userData.network.ip,
+            isLocalhost: userData.isLocalhost
         });
     } catch (error) {
         console.error('Error collecting data:', error);
@@ -285,7 +401,8 @@ app.get('/api/logs', (req, res) => {
                     const logDate = new Date(log.timestamp);
                     const today = new Date();
                     return logDate.toDateString() === today.toDateString();
-                }).length
+                }).length,
+                localhostVisits: logs.filter(log => log.isLocalhost).length
             };
             
             logs.forEach(log => {
@@ -343,16 +460,30 @@ app.get('/api/stats', (req, res) => {
                 hourlyData[hour] = (hourlyData[hour] || 0) + 1;
             });
             
+            // Get unique visitors by IP
+            const uniqueIPs = [...new Set(logs.map(log => log.network.ip))];
+            
             res.json({
                 success: true,
                 hourlyData: hourlyData,
-                total: logs.length
+                total: logs.length,
+                uniqueVisitors: uniqueIPs.length,
+                localhostVisits: logs.filter(log => log.isLocalhost).length,
+                recentVisits: logs.slice(-10).map(log => ({
+                    time: log.timestamp,
+                    ip: log.network.ip,
+                    browser: log.browser.name,
+                    country: log.geo?.country
+                }))
             });
         } else {
             res.json({
                 success: true,
                 hourlyData: {},
-                total: 0
+                total: 0,
+                uniqueVisitors: 0,
+                localhostVisits: 0,
+                recentVisits: []
             });
         }
     } catch (err) {
@@ -413,7 +544,32 @@ app.get('/health', (req, res) => {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        memory: process.memoryUsage()
+        memory: process.memoryUsage(),
+        nodeVersion: process.version,
+        platform: process.platform
+    });
+});
+
+// Debug endpoint to see what headers are being received
+app.get('/api/debug', (req, res) => {
+    const clientIP = getClientIP(req);
+    
+    res.json({
+        success: true,
+        clientIP: clientIP,
+        isLocalhost: isLocalhost(clientIP),
+        headers: {
+            'x-forwarded-for': req.headers['x-forwarded-for'],
+            'x-real-ip': req.headers['x-real-ip'],
+            'cf-connecting-ip': req.headers['cf-connecting-ip'],
+            'forwarded': req.headers['forwarded'],
+            'host': req.headers.host
+        },
+        connection: {
+            remoteAddress: req.connection.remoteAddress,
+            socketRemoteAddress: req.socket.remoteAddress,
+            ip: req.ip
+        }
     });
 });
 
@@ -427,10 +583,11 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
-    console.error(err.stack);
+    console.error('Server error:', err.stack);
     res.status(500).json({
         success: false,
-        error: 'Internal server error'
+        error: 'Internal server error',
+        message: err.message
     });
 });
 
@@ -441,6 +598,7 @@ app.listen(PORT, () => {
     📊 User data being logged to ${dataDir}/
     📈 View stats at http://localhost:${PORT}/api/stats
     📁 View logs at http://localhost:${PORT}/api/logs
+    🐛 Debug info at http://localhost:${PORT}/api/debug
     🏥 Health check at http://localhost:${PORT}/health
     `);
 });
