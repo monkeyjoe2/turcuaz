@@ -94,7 +94,8 @@ function collectEnhancedUserData(req) {
             model: uaResult.device.model,
             vendor: uaResult.device.vendor,
             isMobile: /mobile/i.test(userAgent),
-            isTablet: /tablet/i.test(userAgent)
+            isTablet: /tablet/i.test(userAgent),
+            isDesktop: !/mobile|tablet/i.test(userAgent)
         },
         
         engine: {
@@ -411,7 +412,8 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        memory: process.memoryUsage()
     });
 });
 
@@ -434,8 +436,11 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📊 User data being logged to ${dataDir}/`);
-    console.log(`📈 View stats at http://localhost:${PORT}/api/stats`);
-    console.log(`📁 View logs at http://localhost:${PORT}/api/logs`);
+    console.log(`
+    🚀 Server running on http://localhost:${PORT}
+    📊 User data being logged to ${dataDir}/
+    📈 View stats at http://localhost:${PORT}/api/stats
+    📁 View logs at http://localhost:${PORT}/api/logs
+    🏥 Health check at http://localhost:${PORT}/health
+    `);
 });
