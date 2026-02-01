@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Under Maintenance | System Update</title>
+    <title>System Maintenance | Tracking Demo</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -14,104 +14,244 @@
         <div class="maintenance-card">
             <div class="header">
                 <div class="icon-container">
-                    <i class="fas fa-tools"></i>
+                    <i class="fas fa-server"></i>
                 </div>
-                <h1 class="title">We're Under Maintenance</h1>
-                <p class="subtitle">We're improving our system for a better experience</p>
+                <h1 class="title">System Maintenance in Progress</h1>
+                <p class="subtitle">Advanced analytics are being collected for university research purposes</p>
+                <div class="privacy-badge">
+                    <i class="fas fa-shield-alt"></i>
+                    <span>Research Project - Data Collection Active</span>
+                </div>
             </div>
 
             <div class="content">
-                <div class="status-info">
-                    <div class="status-item">
-                        <i class="fas fa-clock"></i>
-                        <div>
-                            <h3>Estimated Time</h3>
-                            <p>2-3 hours</p>
+                <!-- Status Dashboard -->
+                <div class="dashboard">
+                    <h2><i class="fas fa-chart-line"></i> Live Analytics Dashboard</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <i class="fas fa-users"></i>
+                            <div class="stat-info">
+                                <h3>Total Visitors</h3>
+                                <p class="stat-value" id="totalVisitors">0</p>
+                            </div>
                         </div>
-                    </div>
-                    <div class="status-item">
-                        <i class="fas fa-calendar-alt"></i>
-                        <div>
-                            <h3>Maintenance Window</h3>
-                            <p>10:00 PM - 01:00 AM UTC</p>
+                        <div class="stat-card">
+                            <i class="fas fa-globe"></i>
+                            <div class="stat-info">
+                                <h3>Countries</h3>
+                                <p class="stat-value" id="totalCountries">0</p>
+                            </div>
                         </div>
-                    </div>
-                    <div class="status-item">
-                        <i class="fas fa-server"></i>
-                        <div>
-                            <h3>Services Affected</h3>
-                            <p>All systems temporarily</p>
+                        <div class="stat-card">
+                            <i class="fas fa-desktop"></i>
+                            <div class="stat-info">
+                                <h3>Devices</h3>
+                                <p class="stat-value" id="deviceTypes">0</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fas fa-browser"></i>
+                            <div class="stat-info">
+                                <h3>Browsers</h3>
+                                <p class="stat-value" id="browserTypes">0</p>
+                            </div>
                         </div>
                     </div>
                 </div>
 
+                <!-- Data Collection Info -->
+                <div class="data-collection-info">
+                    <h3><i class="fas fa-database"></i> Data Being Collected</h3>
+                    <div class="data-grid">
+                        <div class="data-item">
+                            <i class="fas fa-map-marker-alt"></i>
+                            <span>Geographic Location</span>
+                        </div>
+                        <div class="data-item">
+                            <i class="fas fa-fingerprint"></i>
+                            <span>Browser Fingerprint</span>
+                        </div>
+                        <div class="data-item">
+                            <i class="fas fa-laptop"></i>
+                            <span>Device Information</span>
+                        </div>
+                        <div class="data-item">
+                            <i class="fas fa-window-maximize"></i>
+                            <span>Screen Properties</span>
+                        </div>
+                        <div class="data-item">
+                            <i class="fas fa-language"></i>
+                            <span>Language & Timezone</span>
+                        </div>
+                        <div class="data-item">
+                            <i class="fas fa-network-wired"></i>
+                            <span>Network Information</span>
+                        </div>
+                        <div class="data-item">
+                            <i class="fas fa-paint-brush"></i>
+                            <span>Canvas Fingerprinting</span>
+                        </div>
+                        <div class="data-item">
+                            <i class="fas fa-tachometer-alt"></i>
+                            <span>Performance Metrics</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Technical Details -->
+                <div class="tech-details">
+                    <h3><i class="fas fa-microscope"></i> Technical Analysis</h3>
+                    <div class="tech-grid">
+                        <div class="tech-item">
+                            <h4>Your Browser</h4>
+                            <p id="browserInfo">Detecting...</p>
+                        </div>
+                        <div class="tech-item">
+                            <h4>Your Device</h4>
+                            <p id="deviceInfo">Detecting...</p>
+                        </div>
+                        <div class="tech-item">
+                            <h4>Your Screen</h4>
+                            <p id="screenInfo">Detecting...</p>
+                        </div>
+                        <div class="tech-item">
+                            <h4>Your Location</h4>
+                            <p id="locationInfo">Detecting...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Collection Status -->
+                <div class="collection-status">
+                    <div class="status-indicator">
+                        <div class="status-dot active"></div>
+                        <span>Data Collection: <strong>ACTIVE</strong></span>
+                    </div>
+                    <div class="status-details">
+                        <p><i class="fas fa-check-circle"></i> Session ID: <code id="sessionId">Generating...</code></p>
+                        <p><i class="fas fa-check-circle"></i> Last Update: <span id="lastUpdate">Just now</span></p>
+                        <p><i class="fas fa-check-circle"></i> Data Points: <span id="dataPoints">0 collected</span></p>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
                 <div class="progress-section">
                     <div class="progress-header">
-                        <h3>Update Progress</h3>
-                        <span class="progress-percent">65%</span>
+                        <h3><i class="fas fa-tasks"></i> System Update Progress</h3>
+                        <span class="progress-percent">78%</span>
                     </div>
                     <div class="progress-bar">
-                        <div class="progress-fill" style="width: 65%"></div>
+                        <div class="progress-fill" style="width: 78%"></div>
+                    </div>
+                    <div class="progress-steps">
+                        <div class="step active">
+                            <i class="fas fa-check"></i>
+                            <span>Security Updates</span>
+                        </div>
+                        <div class="step active">
+                            <i class="fas fa-check"></i>
+                            <span>Database Migration</span>
+                        </div>
+                        <div class="step active">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <span>API Optimization</span>
+                        </div>
+                        <div class="step">
+                            <i class="far fa-clock"></i>
+                            <span>Final Testing</span>
+                        </div>
                     </div>
                 </div>
 
-                <div class="message-box">
-                    <i class="fas fa-info-circle"></i>
-                    <p>Our team is working diligently to complete the maintenance as quickly as possible. We apologize for any inconvenience and appreciate your patience.</p>
-                </div>
-
-                <div class="features-list">
-                    <h3>What we're improving:</h3>
-                    <ul>
-                        <li><i class="fas fa-check-circle"></i> Enhanced security features</li>
-                        <li><i class="fas fa-check-circle"></i> Database optimization</li>
-                        <li><i class="fas fa-check-circle"></i> Performance upgrades</li>
-                        <li><i class="fas fa-check-circle"></i> User interface improvements</li>
-                    </ul>
-                </div>
-
+                <!-- Countdown -->
                 <div class="countdown">
-                    <h3>Expected Completion</h3>
+                    <h3><i class="fas fa-clock"></i> Estimated Completion</h3>
                     <div class="countdown-timer">
                         <div class="countdown-item">
-                            <span class="countdown-value" id="hours">02</span>
+                            <span class="countdown-value" id="hours">01</span>
                             <span class="countdown-label">Hours</span>
                         </div>
                         <div class="countdown-separator">:</div>
                         <div class="countdown-item">
-                            <span class="countdown-value" id="minutes">47</span>
+                            <span class="countdown-value" id="minutes">45</span>
                             <span class="countdown-label">Minutes</span>
                         </div>
                         <div class="countdown-separator">:</div>
                         <div class="countdown-item">
-                            <span class="countdown-value" id="seconds">18</span>
+                            <span class="countdown-value" id="seconds">30</span>
                             <span class="countdown-label">Seconds</span>
                         </div>
                     </div>
                 </div>
 
-                <div class="contact-info">
-                    <p>For urgent inquiries, please contact our support team:</p>
-                    <div class="contact-links">
-                        <a href="mailto:support@turcuaz.com" class="contact-link">
-                            <i class="fas fa-envelope"></i> support@turcuaz.com
+                <!-- University Project Info -->
+                <div class="project-info">
+                    <h3><i class="fas fa-graduation-cap"></i> University Project Information</h3>
+                    <div class="project-details">
+                        <p>This website is part of a university research project studying web analytics and user tracking methodologies.</p>
+                        <div class="project-features">
+                            <p><i class="fas fa-flask"></i> <strong>Research Purpose:</strong> Analyzing browser fingerprinting techniques</p>
+                            <p><i class="fas fa-user-shield"></i> <strong>Ethical Guidelines:</strong> All data is anonymized and used solely for academic research</p>
+                            <p><i class="fas fa-code"></i> <strong>Technologies:</strong> Node.js, Express, Canvas Fingerprinting, GeoIP</p>
+                            <p><i class="fas fa-chart-bar"></i> <strong>Analysis:</strong> Real-time analytics dashboard with comprehensive tracking</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact & Legal -->
+                <div class="legal-section">
+                    <div class="contact-info">
+                        <h4><i class="fas fa-envelope"></i> Contact Researchers</h4>
+                        <p>For questions about this research project:</p>
+                        <a href="mailto:research@university.edu" class="contact-link">
+                            <i class="fas fa-envelope"></i> research@university.edu
                         </a>
-                        <a href="#" class="contact-link">
-                            <i class="fas fa-phone"></i> +1 (555) 123-4567
-                        </a>
+                    </div>
+                    <div class="privacy-info">
+                        <h4><i class="fas fa-shield-alt"></i> Privacy Notice</h4>
+                        <p>This site collects technical data for academic research. No personally identifiable information is stored. You may view the collected data at <a href="/api/logs" target="_blank">/api/logs</a>.</p>
                     </div>
                 </div>
             </div>
 
             <div class="footer">
-                <div class="social-links">
-                    <a href="#" class="social-link"><i class="fab fa-twitter"></i></a>
-                    <a href="#" class="social-link"><i class="fab fa-github"></i></a>
-                    <a href="#" class="social-link"><i class="fab fa-linkedin"></i></a>
+                <div class="footer-content">
+                    <div class="footer-left">
+                        <p class="copyright">
+                            <i class="fas fa-university"></i> 
+                            © 2024 University Research Project - Advanced Web Analytics Study
+                        </p>
+                        <p class="version">v2.0 | Advanced Tracking System</p>
+                    </div>
+                    <div class="footer-right">
+                        <div class="social-links">
+                            <a href="#" class="social-link" title="View Source Code">
+                                <i class="fab fa-github"></i>
+                            </a>
+                            <a href="/api/logs" class="social-link" title="View Collected Data" target="_blank">
+                                <i class="fas fa-database"></i>
+                            </a>
+                            <a href="/api/stats" class="social-link" title="View Statistics" target="_blank">
+                                <i class="fas fa-chart-bar"></i>
+                            </a>
+                            <a href="#" class="social-link" title="Research Paper">
+                                <i class="fas fa-file-pdf"></i>
+                            </a>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
 
+        <!-- Real-time Notification -->
+        <div class="notification" id="dataNotification">
+            <i class="fas fa-sync-alt fa-spin"></i>
+            <p>Collecting technical data for research purposes...</p>
+            <button class="notification-close" onclick="closeNotification()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
     </div>
 
     <script src="script.js"></script>
