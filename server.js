@@ -21,15 +21,16 @@ app.use(helmet({
             styleSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
             scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
             fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
-            imgSrc: ["'self'", "data:"]
+            imgSrc: ["'self'", "data:"],
+            connectSrc: ["'self'"]
         }
     }
 }));
 
 // Other middleware
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 app.use(express.static('public'));
 
@@ -43,37 +44,18 @@ if (!fs.existsSync(dataDir)) {
 function isLocalhost(ip) {
     if (!ip) return true;
     
-    // Clean the IP
-    ip = ip.trim();
-    
-    // Remove IPv6 prefix if present
+    ip = ip.toString().trim();
     ip = ip.replace('::ffff:', '');
     
     const localIPs = ['127.0.0.1', '::1', 'localhost'];
     const privateIPRanges = [
-        '192.168.',
-        '10.',
-        '172.16.',
-        '172.17.',
-        '172.18.',
-        '172.19.',
-        '172.20.',
-        '172.21.',
-        '172.22.',
-        '172.23.',
-        '172.24.',
-        '172.25.',
-        '172.26.',
-        '172.27.',
-        '172.28.',
-        '172.29.',
-        '172.30.',
-        '172.31.'
+        '192.168.', '10.', '172.16.', '172.17.', '172.18.', '172.19.',
+        '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.',
+        '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.'
     ];
     
     if (localIPs.includes(ip)) return true;
     
-    // Check private IP ranges
     for (const range of privateIPRanges) {
         if (ip.startsWith(range)) return true;
     }
@@ -83,33 +65,25 @@ function isLocalhost(ip) {
 
 // Get client IP with proxy support
 function getClientIP(req) {
-    // Priority order for IP detection
     const sources = [
-        // Cloudflare
         req.headers['cf-connecting-ip'],
-        // Standard proxy headers
         req.headers['x-real-ip'],
         req.headers['x-forwarded-for'],
         req.headers['forwarded'],
-        // Express properties
         req.ip,
-        // Connection properties
-        req.socket.remoteAddress,
-        req.connection.remoteAddress
+        req.socket?.remoteAddress,
+        req.connection?.remoteAddress
     ];
     
     for (const source of sources) {
         if (source) {
             let ip = source.toString().trim();
             
-            // Handle x-forwarded-for format: "client, proxy1, proxy2"
             if (source.includes(',')) {
                 const ips = source.split(',').map(ip => ip.trim());
-                // First IP in x-forwarded-for is the client
                 ip = ips[0];
             }
             
-            // Handle forwarded header format: "for=192.0.2.43;proto=http;by=203.0.113.43"
             if (source.includes('for=')) {
                 const match = source.match(/for=([^;]+)/);
                 if (match && match[1]) {
@@ -117,11 +91,7 @@ function getClientIP(req) {
                 }
             }
             
-            // Remove IPv6 prefix if present
-            ip = ip.replace('::ffff:', '');
-            
-            // Clean up
-            ip = ip.trim();
+            ip = ip.replace('::ffff:', '').trim();
             
             if (ip && ip !== '::1' && ip !== '127.0.0.1') {
                 return ip;
@@ -129,7 +99,52 @@ function getClientIP(req) {
         }
     }
     
-    return '127.0.0.1'; // Fallback to localhost
+    return '127.0.0.1';
+}
+
+// Detect VPN/Proxy indicators
+function detectProxyVPN(req, ip) {
+    const indicators = {
+        usingVPN: false,
+        usingProxy: false,
+        usingTor: false,
+        evidence: []
+    };
+    
+    // Check for common VPN/Proxy headers
+    const headers = req.headers;
+    
+    // Common VPN headers
+    if (headers['via'] || headers['x-proxy-id'] || headers['x-forwarded-proto']) {
+        indicators.usingProxy = true;
+        indicators.evidence.push('Proxy headers detected');
+    }
+    
+    // Cloudflare headers (could indicate proxy)
+    if (headers['cf-ray'] || headers['cf-ipcountry']) {
+        indicators.usingProxy = true;
+        indicators.evidence.push('Cloudflare headers detected');
+    }
+    
+    // Check IP ranges for known VPN/proxy services
+    // This is a simplified check - in production you'd use a VPN detection API
+    const knownVPNPatterns = [
+        /^104\.16\./, // Cloudflare
+        /^172\.64\./, // Cloudflare
+        /^185\.159\./, // Some VPNs
+        /^192\.110\./, // Some VPNs
+        /^209\.95\./   // Some VPNs
+    ];
+    
+    for (const pattern of knownVPNPatterns) {
+        if (pattern.test(ip)) {
+            indicators.usingVPN = true;
+            indicators.evidence.push(`IP matches VPN pattern: ${pattern}`);
+            break;
+        }
+    }
+    
+    return indicators;
 }
 
 // Enhanced user data collection
@@ -142,11 +157,10 @@ function collectEnhancedUserData(req) {
     const parser = new UAParser();
     const uaResult = parser.setUA(userAgent).getResult();
     
-    // Get geo location (handle localhost specially)
+    // Get geo location
     let geo = geoip.lookup(clientIP);
     
     if (isLocal && !geo) {
-        // Create dummy geo data for localhost for testing
         geo = {
             country: 'Localhost',
             region: 'Development',
@@ -159,6 +173,9 @@ function collectEnhancedUserData(req) {
             org: 'Development Environment'
         };
     }
+    
+    // Detect VPN/Proxy
+    const proxyInfo = detectProxyVPN(req, clientIP);
     
     // Enhanced user data object
     const userData = {
@@ -173,22 +190,29 @@ function collectEnhancedUserData(req) {
                 'x-forwarded-for': req.headers['x-forwarded-for'] || null,
                 'x-real-ip': req.headers['x-real-ip'] || null,
                 'cf-connecting-ip': req.headers['cf-connecting-ip'] || null,
-                'forwarded': req.headers['forwarded'] || null
+                'forwarded': req.headers['forwarded'] || null,
+                'via': req.headers['via'] || null,
+                'x-proxy-id': req.headers['x-proxy-id'] || null
             },
             isp: geo ? geo.isp : null,
-            organization: geo ? geo.org : null
+            organization: geo ? geo.org : null,
+            as: geo ? geo.as : null,
+            range: geo ? geo.range : null,
+            proxyVPN: proxyInfo
         },
         
         browser: {
             name: uaResult.browser.name || 'Unknown',
             version: uaResult.browser.version || 'Unknown',
             major: uaResult.browser.major || 'Unknown',
+            fullVersion: `${uaResult.browser.name || ''} ${uaResult.browser.version || ''}`.trim(),
             raw: userAgent.substring(0, 500)
         },
         
         os: {
             name: uaResult.os.name || 'Unknown',
-            version: uaResult.os.version || 'Unknown'
+            version: uaResult.os.version || 'Unknown',
+            architecture: detectArchitecture(uaResult, userAgent)
         },
         
         device: {
@@ -211,12 +235,14 @@ function collectEnhancedUserData(req) {
         
         screen: {
             width: req.headers['screen-width'] || req.body.screenWidth || '',
-            height: req.headers['screen-height'] || req.body.screenHeight || ''
+            height: req.headers['screen-height'] || req.body.screenHeight || '',
+            multiMonitor: detectMultiMonitor(req.body)
         },
         
         locale: {
             language: req.headers['accept-language'] || 'Unknown',
-            languages: req.acceptsLanguages() || []
+            languages: req.acceptsLanguages() || [],
+            locale: detectLocaleSettings(req.body)
         },
         
         geo: geo ? {
@@ -240,7 +266,8 @@ function collectEnhancedUserData(req) {
             hostname: req.hostname,
             originalUrl: req.originalUrl,
             path: req.path,
-            query: req.query || {}
+            query: req.query || {},
+            headersCount: Object.keys(req.headers).length
         },
         
         headers: {
@@ -252,18 +279,71 @@ function collectEnhancedUserData(req) {
             'sec-fetch-dest': req.headers['sec-fetch-dest'] || 'Unknown',
             referer: req.headers.referer || 'No referer',
             dnt: req.headers.dnt || 'Not specified'
-        }
+        },
+        
+        // Extended data from client
+        clientData: req.body.extendedData || {}
     };
 
     return userData;
 }
 
-// Generate session ID
+// Helper functions
 function generateSessionId() {
     return 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
 
-// Save user data to file with better error handling
+function detectArchitecture(uaResult, userAgent) {
+    // Detect architecture from user agent
+    const ua = userAgent.toLowerCase();
+    
+    if (ua.includes('win64') || ua.includes('x64') || ua.includes('amd64')) {
+        return 'x64';
+    } else if (ua.includes('win32') || ua.includes('x86')) {
+        return 'x86';
+    } else if (ua.includes('arm64') || ua.includes('aarch64')) {
+        return 'arm64';
+    } else if (ua.includes('arm')) {
+        return 'arm';
+    } else if (uaResult.cpu?.architecture) {
+        return uaResult.cpu.architecture;
+    }
+    
+    return 'Unknown';
+}
+
+function detectMultiMonitor(clientData) {
+    if (!clientData) return false;
+    
+    // Check if client sent multi-monitor info
+    if (clientData.multiMonitor !== undefined) {
+        return clientData.multiMonitor;
+    }
+    
+    // Check screen position for multi-monitor hints
+    if (clientData.screenX !== undefined && clientData.screenY !== undefined) {
+        // If screen position is not at (0,0), might be multi-monitor
+        return clientData.screenX > 0 || clientData.screenY > 0;
+    }
+    
+    return false;
+}
+
+function detectLocaleSettings(clientData) {
+    const locale = {
+        timezone: clientData?.timezone || 'Unknown',
+        timezoneOffset: clientData?.timezoneOffset || 0,
+        locale: clientData?.locale || 'Unknown',
+        language: clientData?.language || 'Unknown',
+        region: clientData?.region || 'Unknown',
+        currency: clientData?.currency || 'Unknown',
+        measurement: clientData?.measurement || 'Unknown'
+    };
+    
+    return locale;
+}
+
+// Save user data to file
 function saveUserData(userData) {
     const logFile = path.join(dataDir, 'logs.json');
     let logs = [];
@@ -277,7 +357,6 @@ function saveUserData(userData) {
         }
     } catch (err) {
         console.error('Error reading log file:', err);
-        // Create fresh logs array if file is corrupted
         logs = [];
     }
 
@@ -287,23 +366,26 @@ function saveUserData(userData) {
         fs.writeFileSync(logFile, JSON.stringify(logs, null, 2));
         console.log(`✅ [${new Date().toISOString()}] Collected data from IP: ${userData.network.ip}`);
         console.log(`   Browser: ${userData.browser.name} ${userData.browser.version}`);
-        console.log(`   OS: ${userData.os.name} ${userData.os.version}`);
+        console.log(`   OS: ${userData.os.name} ${userData.os.version} (${userData.os.architecture})`);
         console.log(`   Device: ${userData.device.type}`);
         console.log(`   Country: ${userData.geo?.country || 'Unknown'}`);
+        console.log(`   ISP: ${userData.network.isp || 'Unknown'}`);
+        console.log(`   VPN/Proxy: ${userData.network.proxyVPN.usingVPN ? 'Yes' : 'No'}`);
         
-        // Also log to CSV for easier analysis
         logToCSV(userData);
     } catch (err) {
         console.error('Error writing log file:', err);
     }
 }
 
-// Log to CSV for spreadsheet analysis
+// Log to CSV
 function logToCSV(userData) {
-    const csvFile = path.join(dataDir, 'logs.csv');
+    const csvFile = path.join(__dirname, 'data', 'logs.csv');
     const headers = [
-        'timestamp', 'ip', 'country', 'city', 'browser', 'browser_version',
-        'os', 'os_version', 'device_type', 'screen', 'language', 'timezone', 'is_localhost'
+        'timestamp', 'ip', 'country', 'city', 'isp', 'org', 
+        'browser', 'browser_version', 'os', 'os_version', 'architecture',
+        'device_type', 'screen', 'language', 'timezone', 
+        'is_localhost', 'is_vpn', 'is_proxy'
     ];
     
     const row = [
@@ -311,15 +393,20 @@ function logToCSV(userData) {
         userData.network.ip,
         userData.geo?.country || 'Unknown',
         userData.geo?.city || 'Unknown',
+        userData.network.isp || 'Unknown',
+        userData.network.organization || 'Unknown',
         userData.browser.name || 'Unknown',
         userData.browser.version || 'Unknown',
         userData.os.name || 'Unknown',
         userData.os.version || 'Unknown',
+        userData.os.architecture || 'Unknown',
         userData.device.type || 'Unknown',
         `${userData.screen.width}x${userData.screen.height}`,
         userData.locale.language?.split(',')[0] || 'Unknown',
         userData.geo?.timezone || 'Unknown',
-        userData.isLocalhost ? 'Yes' : 'No'
+        userData.isLocalhost ? 'Yes' : 'No',
+        userData.network.proxyVPN.usingVPN ? 'Yes' : 'No',
+        userData.network.proxyVPN.usingProxy ? 'Yes' : 'No'
     ].map(field => `"${field}"`).join(',');
     
     try {
@@ -337,9 +424,9 @@ app.post('/api/collect', (req, res) => {
     try {
         const userData = collectEnhancedUserData(req);
         
-        // Merge client-side data if provided
-        if (req.body.clientData) {
-            userData.clientData = req.body.clientData;
+        // Merge extended client-side data
+        if (req.body) {
+            userData.clientData = req.body;
         }
         
         saveUserData(userData);
@@ -350,7 +437,13 @@ app.post('/api/collect', (req, res) => {
             sessionId: userData.sessionId,
             timestamp: userData.timestamp,
             ip: userData.network.ip,
-            isLocalhost: userData.isLocalhost
+            isLocalhost: userData.isLocalhost,
+            collectedData: {
+                browser: userData.browser.name,
+                os: userData.os.name,
+                device: userData.device.type,
+                country: userData.geo?.country
+            }
         });
     } catch (error) {
         console.error('Error collecting data:', error);
@@ -363,7 +456,6 @@ app.post('/api/collect', (req, res) => {
 
 // Serve maintenance page
 app.get('/', (req, res) => {
-    // Set session cookie if not present
     if (!req.cookies.sessionId) {
         const sessionId = generateSessionId();
         res.cookie('sessionId', sessionId, {
@@ -373,7 +465,6 @@ app.get('/', (req, res) => {
         });
     }
     
-    // Collect basic data
     const userData = collectEnhancedUserData(req);
     saveUserData(userData);
     
@@ -389,7 +480,6 @@ app.get('/api/logs', (req, res) => {
             const data = fs.readFileSync(logFile, 'utf8');
             const logs = JSON.parse(data);
             
-            // Statistics
             const stats = {
                 total: logs.length,
                 uniqueIPs: [...new Set(logs.map(log => log.network.ip))].length,
@@ -397,6 +487,9 @@ app.get('/api/logs', (req, res) => {
                 devices: {},
                 countries: {},
                 os: {},
+                architectures: {},
+                vpnUsers: logs.filter(log => log.network.proxyVPN.usingVPN).length,
+                proxyUsers: logs.filter(log => log.network.proxyVPN.usingProxy).length,
                 today: logs.filter(log => {
                     const logDate = new Date(log.timestamp);
                     const today = new Date();
@@ -406,28 +499,27 @@ app.get('/api/logs', (req, res) => {
             };
             
             logs.forEach(log => {
-                // Browser stats
                 const browser = log.browser.name || 'Unknown';
                 stats.browsers[browser] = (stats.browsers[browser] || 0) + 1;
                 
-                // Device stats
                 const deviceType = log.device.type || 'desktop';
                 stats.devices[deviceType] = (stats.devices[deviceType] || 0) + 1;
                 
-                // Country stats
                 const country = log.geo?.country || 'Unknown';
                 stats.countries[country] = (stats.countries[country] || 0) + 1;
                 
-                // OS stats
                 const os = log.os.name || 'Unknown';
                 stats.os[os] = (stats.os[os] || 0) + 1;
+                
+                const arch = log.os.architecture || 'Unknown';
+                stats.architectures[arch] = (stats.architectures[arch] || 0) + 1;
             });
             
             res.json({
                 success: true,
                 stats: stats,
                 total: logs.length,
-                logs: logs.slice(-50).reverse()
+                logs: logs.slice(-100).reverse()
             });
         } else {
             res.json({
@@ -460,7 +552,6 @@ app.get('/api/stats', (req, res) => {
                 hourlyData[hour] = (hourlyData[hour] || 0) + 1;
             });
             
-            // Get unique visitors by IP
             const uniqueIPs = [...new Set(logs.map(log => log.network.ip))];
             
             res.json({
@@ -469,11 +560,16 @@ app.get('/api/stats', (req, res) => {
                 total: logs.length,
                 uniqueVisitors: uniqueIPs.length,
                 localhostVisits: logs.filter(log => log.isLocalhost).length,
-                recentVisits: logs.slice(-10).map(log => ({
+                vpnUsers: logs.filter(log => log.network.proxyVPN.usingVPN).length,
+                proxyUsers: logs.filter(log => log.network.proxyVPN.usingProxy).length,
+                recentVisits: logs.slice(-20).map(log => ({
                     time: log.timestamp,
                     ip: log.network.ip,
                     browser: log.browser.name,
-                    country: log.geo?.country
+                    os: `${log.os.name} ${log.os.version}`,
+                    country: log.geo?.country,
+                    isp: log.network.isp,
+                    vpn: log.network.proxyVPN.usingVPN
                 }))
             });
         } else {
@@ -483,6 +579,8 @@ app.get('/api/stats', (req, res) => {
                 total: 0,
                 uniqueVisitors: 0,
                 localhostVisits: 0,
+                vpnUsers: 0,
+                proxyUsers: 0,
                 recentVisits: []
             });
         }
@@ -546,11 +644,12 @@ app.get('/health', (req, res) => {
         uptime: process.uptime(),
         memory: process.memoryUsage(),
         nodeVersion: process.version,
-        platform: process.platform
+        platform: process.platform,
+        arch: process.arch
     });
 });
 
-// Debug endpoint to see what headers are being received
+// Debug endpoint
 app.get('/api/debug', (req, res) => {
     const clientIP = getClientIP(req);
     
@@ -558,16 +657,10 @@ app.get('/api/debug', (req, res) => {
         success: true,
         clientIP: clientIP,
         isLocalhost: isLocalhost(clientIP),
-        headers: {
-            'x-forwarded-for': req.headers['x-forwarded-for'],
-            'x-real-ip': req.headers['x-real-ip'],
-            'cf-connecting-ip': req.headers['cf-connecting-ip'],
-            'forwarded': req.headers['forwarded'],
-            'host': req.headers.host
-        },
+        headers: req.headers,
         connection: {
-            remoteAddress: req.connection.remoteAddress,
-            socketRemoteAddress: req.socket.remoteAddress,
+            remoteAddress: req.connection?.remoteAddress,
+            socketRemoteAddress: req.socket?.remoteAddress,
             ip: req.ip
         }
     });
